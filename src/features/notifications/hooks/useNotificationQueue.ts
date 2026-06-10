@@ -71,6 +71,14 @@ const sleep = (ms: number, signal?: AbortSignal) => {
   });
 };
 
+const calculateBackoffMs = (attempt: number): number => {
+  const base = 400;
+  const exp = Math.min(6, Math.max(0, attempt - 1));
+  const backoff = base * 2 ** exp;
+  const jitter = Math.floor(Math.random() * 250);
+  return backoff + jitter;
+};
+
 export const useNotificationQueue = (): UseNotificationQueueReturn => {
   const startedAtRef = useRef<number | null>(null);
   const latestRunningCompletedRef = useRef<number>(0);
@@ -103,51 +111,68 @@ export const useNotificationQueue = (): UseNotificationQueueReturn => {
         ) => void;
       },
     ) => {
-      if (record.attempts >= options.maxAttempts) return;
       if (record.job.status === "sending") return;
+      if (record.attempts >= options.maxAttempts) return;
 
       const controller = new AbortController();
       controllersRef.current.set(record.job.id, controller);
 
-      options.onUpdate(record.job.id, {
-        job: { status: "sending", progress: 0 },
-        attempts: record.attempts + 1,
-        lastError: undefined,
-      });
-
-      const totalMs = 1000 + Math.floor(Math.random() * 7000);
-      const startedAt = Date.now();
+      let attempts = record.attempts;
+      let lastError: string | undefined;
 
       try {
-        while (true) {
-          const elapsed = Date.now() - startedAt;
-          const pct = Math.min(100, Math.round((elapsed / totalMs) * 100));
+        while (attempts < options.maxAttempts) {
+          attempts += 1;
+
           options.onUpdate(record.job.id, {
-            job: { status: "sending", progress: pct },
+            job: { status: "sending", progress: 0 },
+            attempts,
+            lastError: undefined,
           });
 
-          if (elapsed >= totalMs) break;
-          await sleep(120, controller.signal);
-        }
+          const totalMs = 1000 + Math.floor(Math.random() * 7000);
+          const startedAt = Date.now();
 
-        const fail = Math.random() < 0.2;
-        if (fail) {
+          while (true) {
+            const elapsed = Date.now() - startedAt;
+            const pct = Math.min(100, Math.round((elapsed / totalMs) * 100));
+            options.onUpdate(record.job.id, {
+              job: { status: "sending", progress: pct },
+            });
+
+            if (elapsed >= totalMs) break;
+            await sleep(120, controller.signal);
+          }
+
+          const fail = Math.random() < 0.2;
+          if (!fail) {
+            options.onUpdate(record.job.id, { job: { status: "sent" }, lastError: undefined });
+            return;
+          }
+
+          lastError = "Simulated send failure";
           options.onUpdate(record.job.id, {
             job: { status: "failed" },
-            lastError: "Simulated send failure",
+            lastError,
           });
-          return;
-        }
 
-        options.onUpdate(record.job.id, { job: { status: "sent" } });
+          if (attempts >= options.maxAttempts) {
+            return;
+          }
+
+          const backoffMs = calculateBackoffMs(attempts);
+          await sleep(backoffMs, controller.signal);
+        }
       } catch (e) {
         if (controller.signal.aborted) {
           options.onUpdate(record.job.id, { job: { status: "queued" } });
           return;
         }
+
+        const errMsg = e instanceof Error ? e.message : "Unknown error";
         options.onUpdate(record.job.id, {
           job: { status: "failed" },
-          lastError: e instanceof Error ? e.message : "Unknown error",
+          lastError: errMsg,
         });
       } finally {
         controllersRef.current.delete(record.job.id);
