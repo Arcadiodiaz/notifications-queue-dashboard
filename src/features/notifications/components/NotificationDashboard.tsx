@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Swal from "sweetalert2";
 import { useNotifications } from "../hooks/useNotifications";
 import { useNotificationQueue } from "../hooks/useNotificationQueue";
 import type { NotificationChannel, NotificationStatus } from "../types/notificationJob";
@@ -76,6 +77,24 @@ export const NotificationDashboard = () => {
       maxAttempts: MAX_ATTEMPTS,
       onUpdate: updateNotification,
     });
+  };
+
+  const onDelete = async (id: string) => {
+    const record = notifications.find((n) => n.job.id === id);
+    const title = record?.job.title ?? "this notification";
+
+    const result = await Swal.fire({
+      title: "Delete notification?",
+      text: `You are about to delete \"${title}\". This action cannot be undone.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Delete",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#dc2626",
+    });
+
+    if (!result.isConfirmed) return;
+    removeNotification(id);
   };
 
   return (
@@ -156,7 +175,7 @@ export const NotificationDashboard = () => {
 
         <NotificationList
           notifications={filteredNotifications}
-          onDelete={removeNotification}
+          onDelete={onDelete}
           onRetry={(id) => updateNotification(id, { job: { status: "queued" }, lastError: undefined })}
           onSend={(id) => {
             const record = notifications.find((n) => n.job.id === id);
