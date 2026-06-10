@@ -16,6 +16,30 @@ export type RunQueueResult<T, R> = {
   results: Array<PromiseSettledResult<R>>;
 };
 
+export const runQueue = async <T>(
+  concurrency: number,
+  jobs: Array<() => Promise<T>>,
+): Promise<T[]> => {
+  const max = Math.max(1, Math.floor(concurrency));
+  const results: T[] = new Array(jobs.length);
+
+  let nextIndex = 0;
+
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const current = nextIndex;
+      nextIndex += 1;
+      if (current >= jobs.length) return;
+
+      results[current] = await jobs[current]();
+    }
+  };
+
+  const runners = Array.from({ length: Math.min(max, jobs.length) }, () => worker());
+  await Promise.all(runners);
+  return results;
+};
+
 export class AbortError extends Error {
   override name = "AbortError";
 
@@ -30,7 +54,7 @@ const throwIfAborted = (signal: AbortSignal | undefined) => {
   }
 };
 
-export const runQueue = async <T, R>(
+export const runQueueWithWorker = async <T, R>(
   items: readonly T[],
   worker: (item: T, ctx: { signal?: AbortSignal }) => Promise<R>,
   options: RunQueueOptions<T>,
