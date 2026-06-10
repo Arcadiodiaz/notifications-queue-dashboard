@@ -51,56 +51,50 @@ export const NotificationForm = ({ onCreate }: Props) => {
       }}
     >
       {({ values, handleChange, handleBlur, errors, touched, isSubmitting }) => (
-        <Form className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-start">
-          <div className="lg:col-span-5">
-            <div className="flex items-center gap-3">
-              <div className="w-12 text-sm font-semibold text-neutral-800">Title</div>
-              <div className="flex-1">
-                <Input
-                  name="title"
-                  placeholder="Enter the title..."
-                  value={values.title}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                />
-              </div>
+        <Form className="flex flex-col gap-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-neutral-600">Title</div>
+            <div className="mt-2">
+              <Input
+                name="title"
+                placeholder="Enter the title..."
+                value={values.title}
+                onChange={handleChange}
+                onBlur={handleBlur}
+              />
             </div>
-            <div className="pl-[60px]">
+            <div className="mt-1">
               <FieldError error={touched.title ? errors.title : undefined} />
             </div>
           </div>
 
-          <div className="lg:col-span-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 text-sm font-semibold text-neutral-800">Canal</div>
-              <div className="flex-1">
-                <select
-                  name="channel"
-                  value={values.channel}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  className="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-900 shadow-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                >
-                  <option value="email">Email</option>
-                  <option value="sms">SMS</option>
-                  <option value="push">Push</option>
-                </select>
-              </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-neutral-600">Channel</div>
+            <div className="mt-2">
+              <select
+                name="channel"
+                value={values.channel}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                className="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-900 shadow-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+                <option value="push">Push</option>
+              </select>
             </div>
-            <div className="pl-[60px]">
+            <div className="mt-1">
               <FieldError error={touched.channel ? (errors.channel as string | undefined) : undefined} />
             </div>
           </div>
 
-          <div className="lg:col-span-3">
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:opacity-50"
-            >
-              Add Notification
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:opacity-50"
+          >
+            Add Notification
+          </button>
         </Form>
       )}
     </Formik>

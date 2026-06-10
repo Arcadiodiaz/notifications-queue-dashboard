@@ -7,7 +7,7 @@ export default function NotificationsPage() {
         <div className="absolute -top-32 left-[-10%] h-[520px] w-[520px] rounded-full bg-blue-500/10 blur-3xl" />
         <div className="absolute top-10 right-[-15%] h-[520px] w-[520px] rounded-full bg-emerald-500/10 blur-3xl" />
       </div>
-      <div className="mx-auto w-full max-w-5xl">
+      <div className="mx-auto w-full max-w-screen-2xl">
         <NotificationDashboard />
       </div>
     </main>
