@@ -19,15 +19,37 @@ type SendState =
 
 type UseNotificationQueueReturn = {
   state: SendState;
+  sendOne: (
+    record: NotificationRecord,
+    options: {
+      maxAttempts: number;
+      onUpdate: (
+        id: string,
+        patch: Partial<{
+          job: Partial<NotificationRecord["job"]>;
+          attempts: number;
+          lastError?: string;
+        }>,
+      ) => void;
+    },
+  ) => Promise<void>;
   sendAll: (
     items: readonly NotificationRecord[],
     options: {
       concurrency: number;
       maxAttempts: number;
-      onUpdate: (id: string, patch: Partial<Pick<NotificationRecord, "status" | "attempts" | "lastError">>) => void;
+      onUpdate: (
+        id: string,
+        patch: Partial<{
+          job: Partial<NotificationRecord["job"]>;
+          attempts: number;
+          lastError?: string;
+        }>,
+      ) => void;
     },
   ) => Promise<void>;
-  abort: () => void;
+  cancelOne: (id: string) => void;
+  cancelAll: () => void;
 };
 
 const sleep = (ms: number, signal?: AbortSignal) => {
@@ -50,14 +72,89 @@ const sleep = (ms: number, signal?: AbortSignal) => {
 };
 
 export const useNotificationQueue = (): UseNotificationQueueReturn => {
-  const abortControllerRef = useRef<AbortController | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const latestRunningCompletedRef = useRef<number>(0);
+  const controllersRef = useRef<Map<string, AbortController>>(new Map());
   const [state, setState] = useState<SendState>({ status: "idle" });
 
-  const abort = useCallback(() => {
-    abortControllerRef.current?.abort();
+  const cancelOne = useCallback((id: string) => {
+    const controller = controllersRef.current.get(id);
+    controller?.abort();
   }, []);
+
+  const cancelAll = useCallback(() => {
+    controllersRef.current.forEach((controller) => {
+      controller.abort();
+    });
+  }, []);
+
+  const sendOne = useCallback(
+    async (
+      record: NotificationRecord,
+      options: {
+        maxAttempts: number;
+        onUpdate: (
+          id: string,
+          patch: Partial<{
+            job: Partial<NotificationRecord["job"]>;
+            attempts: number;
+            lastError?: string;
+          }>,
+        ) => void;
+      },
+    ) => {
+      if (record.attempts >= options.maxAttempts) return;
+      if (record.job.status === "sending") return;
+
+      const controller = new AbortController();
+      controllersRef.current.set(record.job.id, controller);
+
+      options.onUpdate(record.job.id, {
+        job: { status: "sending", progress: 0 },
+        attempts: record.attempts + 1,
+        lastError: undefined,
+      });
+
+      const totalMs = 1000 + Math.floor(Math.random() * 7000);
+      const startedAt = Date.now();
+
+      try {
+        while (true) {
+          const elapsed = Date.now() - startedAt;
+          const pct = Math.min(100, Math.round((elapsed / totalMs) * 100));
+          options.onUpdate(record.job.id, {
+            job: { status: "sending", progress: pct },
+          });
+
+          if (elapsed >= totalMs) break;
+          await sleep(120, controller.signal);
+        }
+
+        const fail = Math.random() < 0.2;
+        if (fail) {
+          options.onUpdate(record.job.id, {
+            job: { status: "failed" },
+            lastError: "Simulated send failure",
+          });
+          return;
+        }
+
+        options.onUpdate(record.job.id, { job: { status: "sent" } });
+      } catch (e) {
+        if (controller.signal.aborted) {
+          options.onUpdate(record.job.id, { job: { status: "queued" } });
+          return;
+        }
+        options.onUpdate(record.job.id, {
+          job: { status: "failed" },
+          lastError: e instanceof Error ? e.message : "Unknown error",
+        });
+      } finally {
+        controllersRef.current.delete(record.job.id);
+      }
+    },
+    [],
+  );
 
   const sendAll = useCallback(
     async (
@@ -65,19 +162,23 @@ export const useNotificationQueue = (): UseNotificationQueueReturn => {
       options: {
         concurrency: number;
         maxAttempts: number;
-        onUpdate: (id: string, patch: Partial<Pick<NotificationRecord, "status" | "attempts" | "lastError">>) => void;
+        onUpdate: (
+          id: string,
+          patch: Partial<{
+            job: Partial<NotificationRecord["job"]>;
+            attempts: number;
+            lastError?: string;
+          }>,
+        ) => void;
       },
     ) => {
       const eligible = items.filter(
         (n) =>
-          (n.status === "pending" || n.status === "failed") &&
+          (n.job.status === "queued" || n.job.status === "failed") &&
           n.attempts < options.maxAttempts,
       );
 
       if (eligible.length === 0) return;
-
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
       startedAtRef.current = Date.now();
       latestRunningCompletedRef.current = 0;
 
@@ -91,84 +192,37 @@ export const useNotificationQueue = (): UseNotificationQueueReturn => {
       });
 
       try {
-        await runQueue(
-          eligible,
-          async (record, ctx) => {
-            options.onUpdate(record.job.id, {
-              status: "sending",
-              attempts: record.attempts + 1,
-              lastError: undefined,
-            });
+        const jobs = eligible.map((record) => async () => {
+          await sendOne(record, {
+            maxAttempts: options.maxAttempts,
+            onUpdate: options.onUpdate,
+          });
+          return record.job.id;
+        });
 
-            try {
-              const jitter = 250 + Math.floor(Math.random() * 650);
-              await sleep(jitter, ctx.signal);
-
-              const fail = Math.random() < 0.2;
-              if (fail) {
-                throw new Error("Simulated send failure");
-              }
-
-              options.onUpdate(record.job.id, { status: "sent" });
-              return { id: record.job.id };
-            } catch (e) {
-              if (ctx.signal?.aborted) throw e;
-
-              options.onUpdate(record.job.id, {
-                status: "failed",
-                lastError: e instanceof Error ? e.message : "Unknown error",
-              });
-
-              return { id: record.job.id };
-            }
-          },
-          {
-            concurrency: options.concurrency,
-            signal: controller.signal,
-            onProgress: (p) => {
-              latestRunningCompletedRef.current = p.completed;
-              setState({
-                status: "running",
-                startedAt: startedAtRef.current ?? Date.now(),
-                completed: p.completed,
-                total: p.total,
-                running: p.running,
-                pending: p.pending,
-              });
-            },
-          },
-        );
+        await runQueue(options.concurrency, jobs);
 
         setState({ status: "done", completed: eligible.length, total: eligible.length });
       } catch (e) {
-        if (controller.signal.aborted) {
-          setState({
-            status: "aborted",
-            completed: latestRunningCompletedRef.current,
-            total: eligible.length,
-          });
-          return;
-        }
-
         if (e instanceof Error) {
-          // The worker handles per-item status, but this ensures the queue doesn't crash silently.
           // No-op.
         }
         throw e;
       } finally {
-        abortControllerRef.current = null;
         startedAtRef.current = null;
       }
     },
-    [],
+    [sendOne],
   );
 
   return useMemo(
     () => ({
       state,
+      sendOne,
       sendAll,
-      abort,
+      cancelOne,
+      cancelAll,
     }),
-    [state, sendAll, abort],
+    [state, sendOne, sendAll, cancelOne, cancelAll],
   );
 };

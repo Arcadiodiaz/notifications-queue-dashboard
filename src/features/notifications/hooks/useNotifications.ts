@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { NotificationJob } from "../types/notificationJob";
-import type { NotificationRecord, NotificationStatus } from "../types/notificationRecord";
+import type { NotificationRecord } from "../types/notificationRecord";
 
 type UseNotificationsReturn = {
   notifications: NotificationRecord[];
@@ -10,9 +10,12 @@ type UseNotificationsReturn = {
   removeNotification: (id: string) => void;
   updateNotification: (
     id: string,
-    patch: Partial<Pick<NotificationRecord, "status" | "attempts" | "lastError">>,
+    patch: Partial<{
+      job: Partial<NotificationJob>;
+      attempts: number;
+      lastError?: string;
+    }>,
   ) => void;
-  setManyStatus: (ids: readonly string[], status: NotificationStatus) => void;
 };
 
 const seedNotifications: NotificationRecord[] = [];
@@ -26,7 +29,6 @@ export const useNotifications = (): UseNotificationsReturn => {
     setNotifications((prev) => [
       {
         job,
-        status: "pending",
         attempts: 0,
       },
       ...prev,
@@ -40,22 +42,26 @@ export const useNotifications = (): UseNotificationsReturn => {
   const updateNotification = useCallback(
     (
       id: string,
-      patch: Partial<Pick<NotificationRecord, "status" | "attempts" | "lastError">>,
+      patch: Partial<{
+        job: Partial<NotificationJob>;
+        attempts: number;
+        lastError?: string;
+      }>,
     ) => {
       setNotifications((prev) =>
-        prev.map((n) => (n.job.id === id ? { ...n, ...patch } : n)),
+        prev.map((n) => {
+          if (n.job.id !== id) return n;
+          return {
+            ...n,
+            job: patch.job ? ({ ...n.job, ...patch.job } as NotificationJob) : n.job,
+            attempts: typeof patch.attempts === "number" ? patch.attempts : n.attempts,
+            lastError: patch.lastError,
+          };
+        }),
       );
     },
     [],
   );
-
-  const setManyStatus = useCallback((ids: readonly string[], status: NotificationStatus) => {
-    if (ids.length === 0) return;
-    const idSet = new Set(ids);
-    setNotifications((prev) =>
-      prev.map((n) => (idSet.has(n.job.id) ? { ...n, status } : n)),
-    );
-  }, []);
 
   return useMemo(
     () => ({
@@ -63,8 +69,7 @@ export const useNotifications = (): UseNotificationsReturn => {
       addNotification,
       removeNotification,
       updateNotification,
-      setManyStatus,
     }),
-    [notifications, addNotification, removeNotification, updateNotification, setManyStatus],
+    [notifications, addNotification, removeNotification, updateNotification],
   );
 };
